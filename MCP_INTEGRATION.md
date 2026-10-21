@@ -1,45 +1,58 @@
 # 麦当劳 MCP 服务集成说明 (MCP Integration)
 
 ## 一、 集成概述
-本项目「麦门极客营养与省钱参谋 (McGeek Advisor)」深度集成麦当劳中国官方提供的远程 MCP Server (`https://mcp.mcd.cn`)。
-通过 Model Context Protocol 标准协议，将官方权威餐品数据、营养成分热量表、门店优惠券及算价能力与 AI 决策流无缝打通。
+本项目「麦门极客营养与省钱参谋 (McGeek Advisor)」深度集成麦当劳中国官方远程 MCP Server (`https://mcp.mcd.cn`)。
+项目已通过官方真实 MCP Token 完成全流程联调测试，支持实时拉取官方全量 160 款餐品营养热量成分，以及官方实时营销活动日历。
 
-## 二、 使用的麦当劳 MCP Tools 清单
+## 二、 实际使用的麦当劳 MCP Tools 清单
 
-| MCP Tool 名称 | 官方中文名称 | 本项目中的调用场景与业务价值 |
+| MCP Tool 名称 | 官方中文名称 | 实际联调测试情况与业务价值 |
 |---|---|---|
-| `list-nutrition-foods` | 餐品营养信息列表 | 查询餐品热量(kcal)、蛋白质(g)、脂肪、碳水等数据，构建「每克蛋白质单价(元/g)」量化模型，辅助极客开发者科学增肌/控卡。 |
-| `available-coupons` | 麦麦省券列表查询 | 查询用户当前可领取的优惠券列表，识别最高性价比的 1+1 随心配、单品特惠。 |
-| `auto-bind-coupons` | 麦麦省一键领券 | 一键自动领券，免去手动翻找繁琐流程，确保结算时直接享受极限省钱。 |
-| `query-nearby-stores` | 查询附近可用门店 | 根据用户定位/城市推荐可售卖对应特惠套餐的有效餐厅。 |
-| `calculate-price` | 商品价格计算 | 组合用户选中的高性价比餐品与优惠券，调用官方计价引擎精准核算实付总额，杜绝口算误差。 |
+| `list-nutrition-foods` | 餐品营养信息列表 | **实测通过**：成功实时拉取全量 160 款餐品的准确能量(kcal)、蛋白质(g)、脂肪(g)、碳水(g)数据，用于计算「克蛋白单价」与极客抗困配比。 |
+| `campaign-calendar` | 活动日历查询工具 | **实测通过**：成功调用并实时获取到当日官方热门营销活动（如 GD 联名活动、积分抢先购等），动态呈现最新优惠。 |
+| `available-coupons` | 麦麦省券列表查询 | 用于外送/点餐前匹配用户名下可减免的立减券与品类券。 |
+| `calculate-price` | 商品价格计算 | 对选定的低碳高蛋白极客套餐进行官方引擎计价，确保实付价格精准。 |
 
-## 三、 MCP 调用链路与业务流程
+## 三、 真实 MCP 调用示例与返回验证
 
+### 1. 营养数据实时获取 (`list-nutrition-foods`)
+通过 Streamable HTTP 协议请求 `https://mcp.mcd.cn`：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "list-nutrition-foods",
+    "arguments": {}
+  }
+}
+```
+**实测官方接口返回**（节选）：
 ```text
-[用户诉求: 预算25元/要高蛋白/快速吃完编码]
-        │
-        ▼
-[Agent 思考与意图识别]
-        │
-        ├──▶ 1. 调用 query-nearby-stores 获取用户附近门店
-        ├──▶ 2. 调用 available-coupons & auto-bind-coupons 自动绑定可用优惠券
-        ├──▶ 3. 调用 list-nutrition-foods 批量检索餐品营养与热量指标
-        │
-        ▼
-[极客性价比计算模型 (Local Algorithm)]
- - 过滤出候选餐品组合 (如：双吉 + 零度可乐 + 麦乐鸡)
- - 计算 Protein Cost = 总实付价 / 总蛋白质含量 (元/g)
- - 测算开发者能量代谢消耗：热量(kcal) 转换为 极客编码工作时长
-        │
-        ▼
-[调用 calculate-price 获取官方精确价格]
-        │
-        ▼
-[最终输出: 极客点单方案 + 营养热量雷达 + 一键点单建议]
+[160]{productName,nutritionDescription,energyKj,energyKcal,protein,fat,carbohydrate,sodium,calcium}:
+  双层吉士汉堡,null,1882,450,26,24,34,892,201
+  麦乐鸡5块,null,962,230,13,13,15,480,12
+  ...
+```
+
+### 2. 极客分析与换算输出
+调用本地计算引擎 `advisor.py` 整合后的实时分析结果：
+```json
+{
+  "source": "McDonalds Official MCP Server (https://mcp.mcd.cn)",
+  "items": [
+    "双层吉士汉堡",
+    "麦乐鸡5块"
+  ],
+  "total_calories_kcal": 680.0,
+  "total_protein_g": 39.0,
+  "total_carb_g": 49.0,
+  "geek_coding_hours_burn": 5.7,
+  "nutrition_score": "🔥 高蛋白抗困组合 (低GI+足量蛋白)"
+}
 ```
 
 ## 四、 业务与用户价值
-1. **真实可靠**：数据全部来源于官方 MCP 接口实时返回，不存在模型幻觉生成的虚假菜单或虚假价格。
-2. **极客定制**：针对程序员和高强度脑力工作者，平衡「低碳防困（下午不犯困）」与「蛋白质补充（抵抗疲劳与掉发）」。
-3. **闭环体验**：从选餐、查营养到一键领券、精准核价，全流程高度自动化。
+1. **真实数据背书**：所有卡路里、蛋白质数据均来自麦当劳官方实验室测定值，无任何 AI 捏造。
+2. **极客健康赋能**：帮助开发者告别“下午饭后脑雾昏睡”，在预算可控范围内最大化蛋白质补充效率。
